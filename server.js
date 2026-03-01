@@ -1,12 +1,11 @@
 const { Telegraf } = require('telegraf');
-const express = require('express');
 const puppeteer = require('puppeteer');
 const sharp = require('sharp');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
 if (!BOT_TOKEN) {
-  console.log('⚠️ BOT_TOKEN not set');
+  console.log('❌ BOT_TOKEN missing!');
   process.exit(1);
 }
 
@@ -26,13 +25,11 @@ async function initBrowser(url) {
     page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 800 });
     
-    console.log(`🌐 Loading: ${url.substring(0, 50)}...`);
+    console.log('🌐 Loading page...');
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-    
-    // Wait for canvas
     await page.waitForSelector('.main-canvas', { timeout: 30000 });
     
-    // Inject API
+    // Inject drawing API
     await page.evaluate(() => {
       window.parasite = {
         drawLine(x1, y1, x2, y2, color = '#000', width = 2) {
@@ -60,37 +57,46 @@ async function initBrowser(url) {
     });
 
     isReady = true;
-    console.log('✅ Ready!');
+    console.log('✅ Browser ready!');
     return true;
   } catch (e) {
-    console.error('❌ Init failed:', e.message);
+    console.error('❌ Browser failed:', e.message);
     return false;
   }
 }
 
 // Commands
 bot.command('start', (ctx) => {
-  ctx.reply('🦠 Parasite Bot\nSend me a doodlegator URL');
+  ctx.reply('🦠 Parasite Bot Ready!\n\nSend me a doodlegator URL to attach.');
 });
 
 bot.on('text', async (ctx) => {
   const text = ctx.message.text;
+  
   if (text.startsWith('http')) {
-    ctx.reply('⏳ Loading...');
+    ctx.reply('⏳ Attaching to host...');
     const success = await initBrowser(text);
+    
     if (success) {
-      ctx.reply('✅ Loaded! Use /line, /circle, /pic');
+      ctx.reply('✅ Attached! Commands:\n/line x1 y1 x2 y2 color width\n/circle x y r color fill\n/pic');
     } else {
-      ctx.reply('❌ Failed');
+      ctx.reply('❌ Failed to attach.');
     }
+    return;
   }
 });
 
 bot.command('line', async (ctx) => {
-  if (!isReady) return ctx.reply('❌ No URL');
+  if (!isReady) return ctx.reply('❌ No host attached');
+  
   const args = ctx.message.text.split(' ').slice(1);
+  if (args.length < 4) return ctx.reply('Usage: /line 100 100 400 400 #ff0000 5');
+  
   const [x1, y1, x2, y2, color = '#000', width = 2] = args;
-  await page.evaluate((a) => window.parasite.drawLine(+a.x1, +a.y1, +a.x2, +a.y2, a.color, +a.width), {x1, y1, x2, y2, color, width});
+  
+  await page.evaluate((a) => {
+    window.parasite.drawLine(+a.x1, +a.y1, +a.x2, +a.y2, a.color, +a.width);
+  }, {x1, y1, x2, y2, color, width});
   
   const canvas = await page.$('.main-canvas');
   const png = await canvas.screenshot();
@@ -99,10 +105,16 @@ bot.command('line', async (ctx) => {
 });
 
 bot.command('circle', async (ctx) => {
-  if (!isReady) return ctx.reply('❌ No URL');
+  if (!isReady) return ctx.reply('❌ No host attached');
+  
   const args = ctx.message.text.split(' ').slice(1);
+  if (args.length < 3) return ctx.reply('Usage: /circle 400 300 50 #3498db true');
+  
   const [x, y, r, color = '#000', fill = 'false'] = args;
-  await page.evaluate((a) => window.parasite.drawCircle(+a.x, +a.y, +a.r, a.color, a.fill === 'true'), {x, y, r, color, fill});
+  
+  await page.evaluate((a) => {
+    window.parasite.drawCircle(+a.x, +a.y, +a.r, a.color, a.fill === 'true');
+  }, {x, y, r, color, fill});
   
   const canvas = await page.$('.main-canvas');
   const png = await canvas.screenshot();
@@ -110,11 +122,20 @@ bot.command('circle', async (ctx) => {
   await ctx.replyWithPhoto({ source: jpg });
 });
 
-// Start
+bot.command('pic', async (ctx) => {
+  if (!isReady) return ctx.reply('❌ No host attached');
+  
+  const canvas = await page.$('.main-canvas');
+  const png = await canvas.screenshot();
+  const jpg = await sharp(png).jpeg({ quality: 85 }).toBuffer();
+  await ctx.replyWithPhoto({ source: jpg });
+});
+
 bot.launch();
-console.log('🤖 Bot started');
+console.log('🤖 Bot started!');
 
 // Keep alive
-const app = express();
-app.get('/', (req, res) => res.json({ status: isReady ? 'ready' : 'waiting' }));
-app.listen(3000, () => console.log('🌐 Server on 3000'));
+const http = require('http');
+http.createServer((req, res) => {
+  res.end('Bot running');
+}).listen(3000);
