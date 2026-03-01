@@ -3,32 +3,27 @@ const express = require('express');
 const { chromium } = require('playwright-core');
 const sharp = require('sharp');
 
-// CONFIGURATION - Set these in Render Environment Variables
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const DRAWING_URL = process.env.DRAWING_URL || 'https://your-drawing-app-url.com';
 
 if (!BOT_TOKEN) {
-  console.error('ERROR: BOT_TOKEN environment variable required');
+  console.error('❌ Set BOT_TOKEN in .replit or environment');
   process.exit(1);
 }
 
-class DrawingBot {
+class ParasiteBot {
   constructor() {
     this.bot = new Telegraf(BOT_TOKEN);
     this.browser = null;
     this.page = null;
     this.isReady = false;
-    this.initPromise = this.initialize();
+    this.currentUrl = null;
   }
 
-  async initialize() {
+  async initialize(url) {
     try {
-      console.log('Launching browser...');
-      
-      // Launch with Render-compatible settings
+      console.log('🚀 Launching parasite browser...');
       this.browser = await chromium.launch({
         headless: true,
-        executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -38,242 +33,361 @@ class DrawingBot {
       });
 
       this.page = await this.browser.newPage();
-      await this.page.setViewportSize({ width: 800, height: 600 });
+      await this.page.setViewportSize({ width: 1200, height: 800 });
       
-      console.log(`Loading drawing UI: ${DRAWING_URL}`);
-      await this.page.goto(DRAWING_URL, { waitUntil: 'networkidle' });
+      console.log(`🌐 Infecting: ${url.substring(0, 50)}...`);
       
-      // Wait for canvas
-      await this.page.waitForSelector('canvas', { timeout: 30000 });
+      // Block unnecessary resources for speed
+      await this.page.route('**/*.{png,jpg,jpeg,gif,svg,woff,woff2}', route => {
+        route.abort();
+      });
+
+      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
       
-      // Inject drawing API
+      // Wait for canvas with multiple attempts
+      let canvasFound = false;
+      for (let i = 0; i < 10; i++) {
+        const canvas = await this.page.$('.main-canvas');
+        if (canvas) {
+          canvasFound = true;
+          break;
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      if (!canvasFound) {
+        throw new Error('Canvas not found after 10 seconds');
+      }
+
+      console.log('✅ Canvas infected!');
+
+      // Inject parasite API
       await this.page.addInitScript(() => {
-        window.botAPI = {
-          drawLine(x1, y1, x2, y2, color = '#000', width = 2) {
-            const canvas = document.querySelector('canvas');
-            const ctx = canvas.getContext('2d');
+        window.parasite = {
+          getMainCanvas() {
+            return document.querySelector('.main-canvas');
+          },
+
+          getTempCanvas() {
+            return document.querySelector('.temp-canvas');
+          },
+
+          // Direct canvas drawing (bypasses UI)
+          drawLine(x1, y1, x2, y2, color = '#000000', width = 2) {
+            const c = this.getMainCanvas();
+            if (!c) return { error: 'No main canvas' };
+            const ctx = c.getContext('2d');
             ctx.strokeStyle = color;
             ctx.lineWidth = width;
             ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
             ctx.beginPath();
             ctx.moveTo(x1, y1);
             ctx.lineTo(x2, y2);
             ctx.stroke();
             return { success: true };
           },
-          
-          drawCircle(x, y, radius, color = '#000', fill = false) {
-            const canvas = document.querySelector('canvas');
-            const ctx = canvas.getContext('2d');
+
+          drawCircle(x, y, radius, color = '#000000', fill = false, width = 2) {
+            const c = this.getMainCanvas();
+            if (!c) return { error: 'No main canvas' };
+            const ctx = c.getContext('2d');
             ctx.strokeStyle = color;
             ctx.fillStyle = color;
+            ctx.lineWidth = width;
             ctx.beginPath();
             ctx.arc(x, y, radius, 0, Math.PI * 2);
             if (fill) ctx.fill();
             ctx.stroke();
             return { success: true };
           },
-          
-          clearCanvas() {
-            const canvas = document.querySelector('canvas');
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          drawRect(x, y, w, h, color = '#000000', fill = false) {
+            const c = this.getMainCanvas();
+            if (!c) return { error: 'No main canvas' };
+            const ctx = c.getContext('2d');
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            if (fill) ctx.fillRect(x, y, w, h);
+            else ctx.strokeRect(x, y, w, h);
             return { success: true };
           },
-          
-          drawStroke(points, color = '#000', width = 2) {
-            const canvas = document.querySelector('canvas');
-            const ctx = canvas.getContext('2d');
-            ctx.strokeStyle = color;
-            ctx.lineWidth = width;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.beginPath();
-            ctx.moveTo(points[0].x, points[0].y);
-            for (let i = 1; i < points.length; i++) {
-              ctx.lineTo(points[i].x, points[i].y);
-            }
-            ctx.stroke();
+
+          clearCanvas() {
+            const c = this.getMainCanvas();
+            if (!c) return { error: 'No main canvas' };
+            const ctx = c.getContext('2d');
+            ctx.clearRect(0, 0, c.width, c.height);
             return { success: true };
+          },
+
+          // Get current image data
+          getImageData() {
+            const c = this.getMainCanvas();
+            if (!c) return null;
+            return c.toDataURL('image/png');
           }
         };
       });
 
       this.isReady = true;
-      console.log('✅ Bot ready!');
-      this.setupCommands();
+      this.currentUrl = url;
+      console.log('✅ Parasite fully attached!');
+      return true;
       
-    } catch (error) {
-      console.error('Initialization failed:', error);
-      throw error;
+    } catch (err) {
+      console.error('❌ Infection failed:', err.message);
+      if (this.browser) await this.browser.close();
+      return false;
     }
   }
 
+  // Click UI element by selector
+  async clickUI(selector) {
+    try {
+      const el = await this.page.$(selector);
+      if (el) {
+        await el.click();
+        await new Promise(r => setTimeout(r, 300)); // Wait for UI update
+        return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Click tool by index (from our scan)
+  async clickTool(index) {
+    const tools = await this.page.$$('.circle-switch');
+    if (tools[index]) {
+      await tools[index].click();
+      await new Promise(r => setTimeout(r, 300));
+      return true;
+    }
+    return false;
+  }
+
+  // Set specific tool
+  async setTool(name) {
+    const tools = {
+      'brush': 0,
+      'eraser': 1,
+      'tool2': 2,  // unknown
+      'tool3': 3,  // unknown
+      'palette': 4,
+      'undo': 5,
+      'redo': 6,
+      'clear': 7,
+      'layers': 8,
+      'tool9': 9   // unknown
+    };
+    
+    const idx = tools[name];
+    if (idx !== undefined) {
+      await this.clickTool(idx);
+      console.log(`🛠️ Tool set: ${name}`);
+      return true;
+    }
+    return false;
+  }
+
   setupCommands() {
-    this.bot.command('start', async (ctx) => {
-      await ctx.reply(
-        '🎨 *Drawing Bot Ready!*\n\n' +
+    this.bot.command('start', (ctx) => {
+      ctx.reply(
+        '🦠 *DOODLE PARASITE BOT*\n\n' +
+        '*How to use:*\n' +
+        '1️⃣ Send me a fresh doodlegator URL\n' +
+        '2️⃣ I infect the page\n' +
+        '3️⃣ You control it remotely\n\n' +
         '*Commands:*\n' +
-        '`/line x1 y1 x2 y2 [color] [width]` - Draw line\n' +
-        '`/circle x y radius [color] [fill]` - Draw circle\n' +
-        '`/stroke [{"x":100,"y":100},...]` - Freehand\n' +
+        '`/line x1 y1 x2 y2 [#color] [width]` - Draw line\n' +
+        '`/circle x y radius [#color] [fill]` - Draw circle\n' +
+        '`/rect x y w h [#color] [fill]` - Draw rectangle\n' +
+        '`/tool brush|eraser|clear|palette` - Switch tool\n' +
         '`/clear` - Clear canvas\n' +
-        '`/pic` - Get current image\n' +
-        '`/demo` - Draw sample\n\n' +
-        'Example: `/line 100 100 300 300 #ff0000 5`',
+        '`/pic` - Screenshot\n' +
+        '`/status` - Check status\n\n' +
+        '⚠️ URL expires ~24h, get fresh from @doodlegatorbot',
         { parse_mode: 'Markdown' }
       );
     });
 
+    // Handle URL paste
+    this.bot.on('text', async (ctx) => {
+      const text = ctx.message.text;
+      
+      if (text.includes('doodlegator.top') && text.startsWith('http')) {
+        ctx.reply('🦠 Attaching parasite to host...');
+        
+        // Kill old infection
+        if (this.browser) {
+          await this.browser.close();
+          this.isReady = false;
+        }
+        
+        const success = await this.initialize(text);
+        
+        if (success) {
+          ctx.reply(
+            '✅ *PARASITE ATTACHED!*\n\n' +
+            'The host is under your control.\n' +
+            'Try: `/line 100 100 400 400 #ff0000 5`',
+            { parse_mode: 'Markdown' }
+          );
+          await this.sendPic(ctx);
+        } else {
+          ctx.reply('❌ Failed to attach. URL may be expired or invalid.');
+        }
+        return;
+      }
+    });
+
     this.bot.command('line', async (ctx) => {
-      if (!this.isReady) return ctx.reply('⏳ Bot still starting...');
+      if (!this.isReady) return ctx.reply('❌ No host attached. Send doodlegator URL first.');
       
       const args = ctx.message.text.split(' ').slice(1);
       if (args.length < 4) {
-        return ctx.reply('❌ Usage: `/line x1 y1 x2 y2 [color] [width]`');
+        return ctx.reply('Usage: `/line 100 100 400 400 #ff0000 5`');
       }
-
-      const [x1, y1, x2, y2, color = '#000000', width = '2'] = args;
+      
+      const [x1, y1, x2, y2, color = '#000000', width = 2] = args;
       
       try {
-        await this.page.evaluate((cmd) => {
-          return window.botAPI.drawLine(
-            parseFloat(cmd.x1), parseFloat(cmd.y1),
-            parseFloat(cmd.x2), parseFloat(cmd.y2),
-            cmd.color, parseFloat(cmd.width)
-          );
-        }, { x1, y1, x2, y2, color, width });
-
-        await this.sendCanvas(ctx);
+        await this.page.evaluate((a) => {
+          return window.parasite.drawLine(+a.x1, +a.y1, +a.x2, +a.y2, a.color, +a.width);
+        }, {x1, y1, x2, y2, color, width});
+        
+        await this.sendPic(ctx);
       } catch (e) {
-        ctx.reply('❌ Error: ' + e.message);
+        ctx.reply('❌ Drawing failed: ' + e.message);
       }
     });
 
     this.bot.command('circle', async (ctx) => {
-      if (!this.isReady) return ctx.reply('⏳ Bot still starting...');
+      if (!this.isReady) return ctx.reply('❌ No host attached. Send URL first.');
       
       const args = ctx.message.text.split(' ').slice(1);
       if (args.length < 3) {
-        return ctx.reply('❌ Usage: `/circle x y radius [color] [fill]`');
+        return ctx.reply('Usage: `/circle 400 300 50 #3498db true`');
       }
-
-      const [x, y, radius, color = '#000000', fill = 'false'] = args;
+      
+      const [x, y, r, color = '#000000', fill = 'false'] = args;
       
       try {
-        await this.page.evaluate((cmd) => {
-          return window.botAPI.drawCircle(
-            parseFloat(cmd.x), parseFloat(cmd.y),
-            parseFloat(cmd.radius), cmd.color, cmd.fill === 'true'
-          );
-        }, { x, y, radius, color, fill });
-
-        await this.sendCanvas(ctx);
+        await this.page.evaluate((a) => {
+          return window.parasite.drawCircle(+a.x, +a.y, +a.r, a.color, a.fill === 'true');
+        }, {x, y, r, color, fill});
+        
+        await this.sendPic(ctx);
       } catch (e) {
-        ctx.reply('❌ Error: ' + e.message);
+        ctx.reply('❌ Drawing failed: ' + e.message);
       }
     });
 
-    this.bot.command('stroke', async (ctx) => {
-      if (!this.isReady) return ctx.reply('⏳ Bot still starting...');
+    this.bot.command('rect', async (ctx) => {
+      if (!this.isReady) return ctx.reply('❌ No host attached. Send URL first.');
+      
+      const args = ctx.message.text.split(' ').slice(1);
+      if (args.length < 4) {
+        return ctx.reply('Usage: `/rect 100 100 200 150 #00ff00 true`');
+      }
+      
+      const [x, y, w, h, color = '#000000', fill = 'false'] = args;
       
       try {
-        const jsonStr = ctx.message.text.split(' ').slice(1).join(' ');
-        const points = JSON.parse(jsonStr);
+        await this.page.evaluate((a) => {
+          return window.parasite.drawRect(+a.x, +a.y, +a.w, +a.h, a.color, a.fill === 'true');
+        }, {x, y, w, h, color, fill});
         
-        if (!Array.isArray(points) || points.length < 2) {
-          return ctx.reply('❌ Need at least 2 points: `[{"x":100,"y":100},{"x":200,"y":200}]`');
-        }
-
-        await this.page.evaluate((cmd) => {
-          return window.botAPI.drawStroke(cmd.points, '#e74c3c', 3);
-        }, { points });
-
-        await this.sendCanvas(ctx);
+        await this.sendPic(ctx);
       } catch (e) {
-        ctx.reply('❌ Invalid JSON: ' + e.message);
+        ctx.reply('❌ Drawing failed: ' + e.message);
+      }
+    });
+
+    this.bot.command('tool', async (ctx) => {
+      if (!this.isReady) return ctx.reply('❌ No host attached.');
+      
+      const args = ctx.message.text.split(' ').slice(1);
+      const toolName = args[0]?.toLowerCase();
+      
+      if (!toolName) {
+        return ctx.reply('Usage: `/tool brush` or `/tool eraser` or `/tool clear`');
+      }
+      
+      const success = await this.setTool(toolName);
+      if (success) {
+        ctx.reply(`🛠️ Tool activated: *${toolName}*`, { parse_mode: 'Markdown' });
+      } else {
+        ctx.reply('❌ Unknown tool. Try: brush, eraser, clear, palette, undo, redo, layers');
       }
     });
 
     this.bot.command('clear', async (ctx) => {
-      if (!this.isReady) return ctx.reply('⏳ Bot still starting...');
+      if (!this.isReady) return ctx.reply('❌ No host attached.');
       
-      await this.page.evaluate(() => window.botAPI.clearCanvas());
-      ctx.reply('🧹 Canvas cleared!');
-      await this.sendCanvas(ctx);
+      await this.setTool('clear');
+      ctx.reply('🧹 Canvas purged!');
+      await this.sendPic(ctx);
     });
 
     this.bot.command('pic', async (ctx) => {
-      if (!this.isReady) return ctx.reply('⏳ Bot still starting...');
-      await this.sendCanvas(ctx);
+      if (!this.isReady) return ctx.reply('❌ No host attached.');
+      await this.sendPic(ctx);
     });
 
-    this.bot.command('demo', async (ctx) => {
-      if (!this.isReady) return ctx.reply('⏳ Bot still starting...');
-      
-      ctx.reply('🎨 Drawing demo...');
-      
-      // Draw house
-      const commands = [
-        { type: 'line', x1: 200, y1: 400, x2: 200, y2: 250, color: '#8b4513', width: 3 },
-        { type: 'line', x1: 200, y1: 250, x2: 400, y2: 250, color: '#8b4513', width: 3 },
-        { type: 'line', x1: 400, y1: 250, x2: 400, y2: 400, color: '#8b4513', width: 3 },
-        { type: 'line', x1: 400, y1: 400, x2: 200, y2: 400, color: '#8b4513', width: 3 },
-        { type: 'line', x1: 200, y1: 250, x2: 300, y2: 150, color: '#e74c3c', width: 3 },
-        { type: 'line', x1: 300, y1: 150, x2: 400, y2: 250, color: '#e74c3c', width: 3 },
-        { type: 'circle', x: 550, y: 150, radius: 40, color: '#f1c40f', fill: true },
-      ];
-
-      for (const cmd of commands) {
-        if (cmd.type === 'line') {
-          await this.page.evaluate((c) => window.botAPI.drawLine(c.x1, c.y1, c.x2, c.y2, c.color, c.width), cmd);
-        } else if (cmd.type === 'circle') {
-          await this.page.evaluate((c) => window.botAPI.drawCircle(c.x, c.y, c.radius, c.color, c.fill), cmd);
-        }
-        await new Promise(r => setTimeout(r, 200)); // Animation delay
+    this.bot.command('status', (ctx) => {
+      if (this.isReady) {
+        ctx.reply(
+          '✅ *PARASITE ACTIVE*\n' +
+          `Host: ${this.currentUrl?.substring(0, 40)}...\n` +
+          'Ready for commands.',
+          { parse_mode: 'Markdown' }
+        );
+      } else {
+        ctx.reply('❌ No host. Send doodlegator URL to attach.');
       }
-
-      await this.sendCanvas(ctx);
     });
   }
 
-  async sendCanvas(ctx) {
+  async sendPic(ctx) {
     try {
-      const canvas = await this.page.$('canvas');
-      const screenshot = await canvas.screenshot({ type: 'png' });
+      const canvas = await this.page.$('.main-canvas');
+      if (!canvas) {
+        return ctx.reply('❌ Canvas lost! Host may have disconnected.');
+      }
       
-      // Optimize for Telegram
-      const optimized = await sharp(screenshot)
+      const png = await canvas.screenshot({ type: 'png' });
+      const jpg = await sharp(png)
         .resize(800, 600, { fit: 'inside' })
         .jpeg({ quality: 85 })
         .toBuffer();
-
-      await ctx.replyWithPhoto({ source: optimized });
+      
+      await ctx.replyWithPhoto({ source: jpg });
     } catch (e) {
-      console.error('Screenshot error:', e);
+      console.error('Screenshot failed:', e);
       ctx.reply('❌ Failed to capture canvas');
     }
   }
 
   start() {
-    // Keep alive for Render
+    // Keep-alive server
     const app = express();
-    app.get('/', (req, res) => {
-      res.json({ 
-        status: this.isReady ? 'ready' : 'starting',
-        timestamp: new Date().toISOString()
-      });
-    });
-    app.listen(process.env.PORT || 3000, () => {
-      console.log('Keep-alive server running');
+    app.get('/', (req, res) => res.json({
+      status: this.isReady ? 'parasite_active' : 'waiting_for_host',
+      host: this.isReady ? 'connected' : 'none',
+      timestamp: Date.now()
+    }));
+    app.listen(3000, '0.0.0.0', () => {
+      console.log('🌐 Keep-alive server on port 3000');
     });
 
-    // Start bot
+    this.setupCommands();
     this.bot.launch();
-    console.log('🤖 Bot started');
+    console.log('🦠 PARASITE BOT READY');
+    console.log('Waiting for host (doodlegator URL)...');
   }
 }
 
-// Run
-const bot = new DrawingBot();
-bot.start();
+new ParasiteBot().start();
